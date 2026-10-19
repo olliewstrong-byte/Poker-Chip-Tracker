@@ -1,0 +1,11 @@
+{
+  "name": "chip-leader",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Poker chip tracker for home games — real cards, the app does the betting math, pots and side pots.",
+  "scripts": {
+    "test": "node --test tests/engine.test.js",
+    "start": "npx --yes serve ."
+  },
+  "license": "MIT"
+}
