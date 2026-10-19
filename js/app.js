@@ -944,6 +944,13 @@
   document.addEventListener('pointerdown', keepAwake);
   document.addEventListener('visibilitychange', keepAwake);
 
+  // Installable app: cache the files so the tracker works offline.
+  if ('serviceWorker' in navigator && /^https:|^http:\/\/localhost/.test(location.href)) {
+    window.addEventListener('load', function () {
+      navigator.serviceWorker.register('sw.js').catch(function () { /* not available here */ });
+    });
+  }
+
   load();
   render();
 })();

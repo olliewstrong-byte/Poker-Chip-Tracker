@@ -18,15 +18,26 @@ A poker chip tracker for home games. You deal real cards, and the app keeps trac
 - **Hand log and history**, plus each player's buy-ins and how far up or down they are.
 - **Saves automatically** on the device, so a refresh or a locked phone won't lose the game.
 
-## Running it
+## Put it online (free, one-time setup)
 
-It's a static site with no build step. Open `index.html` in a browser, or serve the folder:
+1. On GitHub, open this repository's **Settings → Pages**.
+2. Under **Build and deployment**, set **Source** to **Deploy from a branch**. Choose the branch with this code (`claude/poker-chip-tracker-4eyav2`) and the **/ (root)** folder, then click **Save**.
+3. Wait a minute or two. The site will be live at **https://olliewstrong-byte.github.io/Poker-Chip-Tracker/**
 
-```sh
-npm start        # serves the folder at http://localhost:3000
-```
+Every push to that branch updates the site automatically.
 
-To put it online for your group, turn on **GitHub Pages** for this repository (Settings → Pages → deploy from the `main` branch, root folder). On a phone, use "Add to Home Screen" to get a full-screen app.
+### Install it on your phone
+
+- **iPhone (Safari):** open the link, tap **Share**, then **Add to Home Screen**.
+- **Android (Chrome):** open the link, tap **⋮**, then **Install app** (or **Add to Home screen**).
+
+It then opens full screen from its own icon, like a normal app. It also keeps working with no signal: after the first visit, the app is cached on the phone.
+
+Games are saved on the device that's running them. The phone you hand round the table keeps the game, even if the app is closed.
+
+### Running it locally
+
+It's a static site with no build step. Open `index.html` in a browser, or run `npm start` to serve the folder.
 
 ## Tests
 
@@ -39,6 +50,7 @@ npm test
 ## Files
 
 - `index.html`: page shell
+- `manifest.webmanifest`, `sw.js`, `icons/`: home-screen install and offline support
 - `css/style.css`: the table, felt and controls
 - `js/engine.js`: betting rules and pot math, with no UI code
 - `js/app.js`: the interface
