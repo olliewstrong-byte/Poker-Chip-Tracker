@@ -4,7 +4,7 @@ A poker chip tracker for home games. You deal real cards, and the app keeps trac
 
 ## Features
 
-- **Table setup**: 2–10 players, starting chips, small and big blind, an optional ante, and who deals first.
+- **Table setup**: 2–10 players, any exact number of starting chips, small and big blind, an optional ante, and who deals first.
 - **Real No-Limit Hold'em betting**: each player gets only the moves that are legal right now (fold, check, call, bet, raise or all-in).
   - Blinds post automatically and the button moves every hand. Heads-up, the dealer posts the small blind and acts first pre-flop.
   - Minimum raises follow the last full bet or raise.
@@ -13,7 +13,7 @@ A poker chip tracker for home games. You deal real cards, and the app keeps trac
 - **Raise sizing**: Min, ½ Pot, ¾ Pot, Pot and All-in buttons, plus a slider and a box for typing an exact amount.
 - **Side pots**: when players are all-in for different amounts, the app builds a main pot and side pots. At showdown you tap who won each pot, or tap two or more players to split it. Odd chips go to the winner closest to the left of the button.
 - **Stacks update after every action**: the pot total, each player's bet and each stack are always on screen.
-- **Undo** steps back one action at a time, even after a pot has been paid out.
+- **Undo and redo**: every button press can be undone, all the way back to the start of the hand and earlier, and each step restores every stack, bet and pot exactly. Redo steps forward again, **Latest** jumps straight back to the most recent action, and **Rewind to start of hand** in the menu jumps back to just after the blinds were posted. The history survives closing the app. Taking a new action after undoing replaces the undone steps.
 - **Between hands**: add chips (rebuys), sit players out, add or remove players, move the button and change the blinds.
 - **Hand log and history**, plus each player's buy-ins and how far up or down they are.
 - **Saves automatically** on the device, so a refresh or a locked phone won't lose the game.

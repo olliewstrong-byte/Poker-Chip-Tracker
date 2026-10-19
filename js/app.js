@@ -9,13 +9,14 @@
   var E = window.PokerEngine;
   var STORE_KEY = 'chip-leader:game:v1';
   var SETUP_KEY = 'chip-leader:setup:v1';
-  var UNDO_LIMIT = 200;
+  var UNDO_LIMIT = 500;
 
   var app = document.getElementById('app');
   var toastEl = document.getElementById('toast');
 
   var game = null;
-  var undoStack = [];
+  var undoStack = []; // { s: game snapshot (JSON), label: what the change was }
+  var redoStack = []; // changes that were undone, newest last
   var ui = {
     sheet: null, // 'log' | 'players' | 'menu'
     raiseOpen: false,
@@ -45,7 +46,8 @@
         var saved = JSON.parse(raw);
         if (saved && saved.game && saved.game.version === 1) {
           game = saved.game;
-          undoStack = Array.isArray(saved.undo) ? saved.undo : [];
+          undoStack = toEntries(saved.undo);
+          redoStack = toEntries(saved.redo);
         }
       }
       var s = localStorage.getItem(SETUP_KEY);
@@ -53,11 +55,27 @@
     } catch (e) { /* storage unavailable — start fresh */ }
   }
 
+  function toEntries(list) {
+    if (!Array.isArray(list)) return [];
+    return list.map(function (x) { return typeof x === 'string' ? { s: x, label: '' } : x; });
+  }
+
+  // Keep as much undo/redo history as fits in storage; fall back to less if it's full.
   function save() {
     try {
-      if (game) localStorage.setItem(STORE_KEY, JSON.stringify({ game: game, undo: undoStack.slice(-60) }));
-      else localStorage.removeItem(STORE_KEY);
-    } catch (e) { /* storage full or blocked — the game still works this session */ }
+      if (!game) return localStorage.removeItem(STORE_KEY);
+    } catch (e) { return; }
+    var keep = [400, 150, 40, 0];
+    for (var k = 0; k < keep.length; k++) {
+      try {
+        localStorage.setItem(STORE_KEY, JSON.stringify({
+          game: game,
+          undo: keep[k] ? undoStack.slice(-keep[k]) : [],
+          redo: keep[k] ? redoStack.slice(-keep[k]) : [],
+        }));
+        return;
+      } catch (e) { /* too big or blocked — try smaller */ }
+    }
   }
 
   function saveSetup() {
@@ -89,9 +107,11 @@
     toastTimer = setTimeout(function () { toastEl.hidden = true; }, 2800);
   }
 
-  // Apply a change to the game; keep a snapshot so it can be undone.
-  function commit(fn) {
+  // Apply a change to the game; keep a full snapshot of the state before it so it can be undone.
+  function commit(fn, label) {
     var snap = JSON.stringify(game);
+    var beforeHand = game.hand ? game.hand.number : 0;
+    var beforeLog = game.hand ? game.hand.log.length : 0;
     try {
       fn(game);
     } catch (err) {
@@ -100,25 +120,91 @@
       render();
       return false;
     }
-    undoStack.push(snap);
+    undoStack.push({ s: snap, label: label || describeChange(beforeHand, beforeLog) });
     if (undoStack.length > UNDO_LIMIT) undoStack.shift();
+    redoStack = []; // a new action replaces anything that was undone
     ui.raiseOpen = false;
     save();
     render();
     return true;
   }
 
-  function undo() {
-    if (!undoStack.length) return;
-    game = JSON.parse(undoStack.pop());
+  function describeChange(beforeHand, beforeLog) {
+    var h = game.hand;
+    if (!h) return 'table change';
+    if (h.number !== beforeHand) return 'deal hand ' + h.number;
+    var entry = h.log.slice(beforeLog).filter(function (e) { return e.who; })[0] || h.log[beforeLog];
+    if (!entry) return 'table change';
+    return (entry.who ? entry.who + ' ' : '') + entry.text;
+  }
+
+  // Move one step back (undo) or forward (redo) through the saved snapshots.
+  function step(from, to) {
+    var entry = from.pop();
+    to.push({ s: JSON.stringify(game), label: entry.label });
+    game = JSON.parse(entry.s);
+    return entry.label;
+  }
+
+  function afterTimeTravel(msg) {
     ui.raiseOpen = false;
     ui.winnersFor = null;
     save();
     render();
-    toast('Undid the last action', 'info');
+    if (msg) toast(msg, 'info');
+  }
+
+  function undo() {
+    if (!undoStack.length) return;
+    var label = step(undoStack, redoStack);
+    afterTimeTravel('Undid: ' + (label || 'last action'));
+  }
+
+  function redo() {
+    if (!redoStack.length) return;
+    var label = step(redoStack, undoStack);
+    afterTimeTravel('Redid: ' + (label || 'last action'));
+  }
+
+  function redoAll() {
+    var n = redoStack.length;
+    while (redoStack.length) step(redoStack, undoStack);
+    if (n) afterTimeTravel('Back to the latest action');
+  }
+
+  function handOf(entry) {
+    var g = JSON.parse(entry.s);
+    return g && g.hand ? g.hand.number : null;
+  }
+
+  // Undo back to just after this hand was dealt (blinds posted, nobody has acted).
+  function rewindToHandStart() {
+    if (!game.hand) return;
+    var n = game.hand.number, steps = 0;
+    while (undoStack.length && handOf(undoStack[undoStack.length - 1]) === n) {
+      step(undoStack, redoStack);
+      steps++;
+    }
+    afterTimeTravel(steps ? 'Back to the start of hand ' + n : 'Already at the start of hand ' + n);
+  }
+
+  function renderRewindBar() {
+    if (!redoStack.length) return '';
+    var n = redoStack.length;
+    var atStart = !game.hand || !undoStack.length || handOf(undoStack[undoStack.length - 1]) !== game.hand.number;
+    return '<div class="rewind-bar">' +
+        '<div><b>Went back ' + n + ' step' + (n === 1 ? '' : 's') + '</b>' +
+        '<span>Redo replays: ' + esc(redoStack[n - 1].label || 'the next action') + '. A new action replaces the undone steps.</span></div>' +
+        '<div class="rewind-btns">' +
+          '<button class="mini" data-do="hand-start"' + (atStart ? ' disabled' : '') + '>⏮ Hand start</button>' +
+          '<button class="mini" data-do="redo">Redo 1</button>' +
+          '<button class="mini gold" data-do="redo-all">Latest ⏭</button>' +
+        '</div>' +
+      '</div>';
   }
 
   var ICONS = {
+    redo: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/></svg>',
     undo: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>',
     log: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1.2" fill="currentColor"/><circle cx="4.5" cy="12" r="1.2" fill="currentColor"/><circle cx="4.5" cy="18" r="1.2" fill="currentColor"/></svg>',
     players: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14.2A6.5 6.5 0 0 1 21.5 20"/></svg>',
@@ -155,9 +241,6 @@
       dealerOpts += '<option value="' + d + '"' + (d === setup.dealer ? ' selected' : '') + '>' +
         esc(setupName(d) || 'Player ' + (d + 1)) + '</option>';
     }
-    var stackPresets = [500, 1000, 2000, 5000, 10000].map(function (v) {
-      return '<button type="button" class="pill" data-do="stack-preset" data-v="' + v + '" aria-pressed="' + (setup.stack === v) + '">' + fmt(v) + '</button>';
-    }).join('');
 
     app.innerHTML =
       '<div class="setup">' +
@@ -179,10 +262,8 @@
           '</section>' +
           '<section class="field-group">' +
             '<header><h2>Chips &amp; blinds</h2></header>' +
-            '<div class="field"><label for="stack">Starting chips each</label>' +
-              '<input class="input" id="stack" data-setup="stack" type="number" inputmode="numeric" min="1" step="1" value="' + setup.stack + '"></div>' +
-            '<div class="presets-row">' + stackPresets + '</div>' +
             '<div class="grid-fields">' +
+              '<div class="field"><label for="stack">Starting chips</label><input class="input" id="stack" data-setup="stack" type="number" inputmode="numeric" min="1" step="1" value="' + setup.stack + '"></div>' +
               '<div class="field"><label for="sb">Small blind</label><input class="input" id="sb" data-setup="sb" type="number" inputmode="numeric" min="1" step="1" value="' + setup.sb + '"></div>' +
               '<div class="field"><label for="bb">Big blind</label><input class="input" id="bb" data-setup="bb" type="number" inputmode="numeric" min="1" step="1" value="' + setup.bb + '"></div>' +
               '<div class="field"><label for="ante">Ante <span style="text-transform:none;letter-spacing:0">(optional)</span></label><input class="input" id="ante" data-setup="ante" type="number" inputmode="numeric" min="0" step="1" value="' + setup.ante + '"></div>' +
@@ -223,6 +304,7 @@
       return setupError(err.message);
     }
     undoStack = [];
+    redoStack = [];
     ui.setupError = '';
     save();
     render();
@@ -258,6 +340,7 @@
           '<div class="hand-info"><b>' + title + '</b><span>' + blinds + '</span></div>' +
           '<nav>' +
             '<button class="icon-btn" data-do="undo" ' + (undoStack.length ? '' : 'disabled') + ' aria-label="Undo">' + ICONS.undo + '<span class="lbl">Undo</span></button>' +
+            '<button class="icon-btn" data-do="redo" ' + (redoStack.length ? '' : 'disabled') + ' aria-label="Redo">' + ICONS.redo + '<span class="lbl">Redo</span></button>' +
             '<button class="icon-btn" data-do="sheet" data-sheet="log" aria-label="Hand log">' + ICONS.log + '<span class="lbl">Log</span></button>' +
             '<button class="icon-btn" data-do="sheet" data-sheet="players" aria-label="Players and chip counts">' + ICONS.players + '<span class="lbl">Players</span></button>' +
             '<button class="icon-btn" data-do="sheet" data-sheet="menu" aria-label="Menu">' + ICONS.menu + '</button>' +
@@ -269,7 +352,7 @@
             bets + seats +
           '</div>' +
         '</main>' +
-        '<footer class="dock"><div class="dock-inner">' + renderDock() + '</div></footer>' +
+        '<footer class="dock"><div class="dock-inner">' + renderRewindBar() + renderDock() + '</div></footer>' +
         (ui.sheet ? renderSheet() : '') +
       '</div>';
   }
@@ -654,13 +737,16 @@
     } else {
       out += '<button class="btn btn-ghost btn-big" data-do="new-ask">New game</button>';
     }
+    if (game.hand && undoStack.length && handOf(undoStack[undoStack.length - 1]) === game.hand.number) {
+      out += '<button class="btn btn-ghost btn-big" data-do="hand-start">Rewind to start of hand ' + game.hand.number + '</button>';
+    }
     out += '<div class="field-group"><h3>How the math works</h3><ul class="rules">' +
       '<li>Blinds post automatically and the button moves one seat each hand. Heads-up, the dealer posts the small blind.</li>' +
       '<li>A raise must be at least the size of the last full bet or raise. An all-in for less doesn’t reopen betting for players who already acted.</li>' +
       '<li>Any part of a bet nobody can call goes straight back to the bettor.</li>' +
       '<li>When someone is all-in, the pot is split into a main pot and side pots. Each player can only win what they matched.</li>' +
       '<li>Split pots are shared evenly; an odd chip goes to the winner closest to the left of the button.</li>' +
-      '<li>Made a mistake? Undo steps back one action at a time, even after a hand is paid out.</li>' +
+      '<li>Made a mistake? Undo steps back one action at a time, right back to the start of the hand and beyond, restoring every stack and bet exactly. Redo, or Latest, brings everything back as long as you haven’t taken a new action since.</li>' +
       '</ul></div>';
     return out;
   }
@@ -763,10 +849,6 @@
       if (setup.dealer >= setup.count) setup.dealer = 0;
       render();
     },
-    'stack-preset': function (d) {
-      setup.stack = Number(d.v);
-      render();
-    },
 
     // betting
     act: function (d) { commit(function (g) { E.act(g, { type: d.type }); }); },
@@ -809,6 +891,9 @@
 
     // menus
     undo: undo,
+    redo: redo,
+    'redo-all': redoAll,
+    'hand-start': function () { ui.sheet = null; rewindToHandStart(); },
     sheet: function (d) { ui.sheet = d.sheet; ui.confirmNew = false; render(); },
     'close-sheet': function (d, el, e) {
       if (d.self && e.target !== el) return;
@@ -828,6 +913,7 @@
       }
       game = null;
       undoStack = [];
+      redoStack = [];
       ui.sheet = null;
       ui.confirmNew = false;
       save();
@@ -894,11 +980,6 @@
         document.getElementById('bb').value = setup.bb;
       }
       if (key === 'bb') setup.bbTouched = true;
-      if (key === 'stack') {
-        Array.prototype.forEach.call(document.querySelectorAll('[data-do="stack-preset"]'), function (p) {
-          p.setAttribute('aria-pressed', String(Number(p.dataset.v) === setup.stack));
-        });
-      }
       var depth = document.getElementById('depth');
       if (depth) depth.innerHTML = depthText();
       return;

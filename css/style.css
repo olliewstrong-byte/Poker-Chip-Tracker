@@ -565,6 +565,22 @@ input[type='range'] { flex: 1; min-width: 0; accent-color: var(--gold); height: 
 .pick[aria-pressed='true'] { background: var(--gold); border-color: var(--gold); color: #2b1b06; }
 .runout-note { margin: 0; padding: 8px 12px; border-radius: 10px; background: rgba(196, 52, 63, 0.16); border: 1px solid rgba(196, 52, 63, 0.45); font-size: 14px; }
 
+.rewind-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: rgba(47, 109, 181, 0.16);
+  border: 1px solid rgba(47, 109, 181, 0.55);
+  font-size: 13px;
+}
+.rewind-bar > div:first-child { display: flex; flex-direction: column; min-width: 0; flex: 1 1 200px; }
+.rewind-bar b { font-family: var(--label); font-size: 15px; letter-spacing: 0.06em; text-transform: uppercase; }
+.rewind-bar span { color: var(--muted); }
+.rewind-btns { display: flex; gap: 6px; flex-wrap: wrap; }
 .results { display: flex; flex-direction: column; gap: 4px; }
 .results-title { font-family: var(--display); font-size: 24px; line-height: 1.15; color: var(--gold); text-wrap: balance; }
 .nets { display: flex; flex-wrap: wrap; gap: 6px; }
