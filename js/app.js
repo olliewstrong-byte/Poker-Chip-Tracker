@@ -1,5 +1,5 @@
 /*
- * Chip Leader — UI for the poker chip engine.
+ * Chip Tracker — UI for the poker chip engine.
  * Renders the setup form, the table, the action dock and the side sheets,
  * and saves the game to this device after every change.
  */
@@ -7,6 +7,7 @@
   'use strict';
 
   var E = window.PokerEngine;
+  // Storage keys keep the app's original name so games saved before the rename still load.
   var STORE_KEY = 'chip-leader:game:v1';
   var SETUP_KEY = 'chip-leader:setup:v1';
   var UNDO_LIMIT = 500;
@@ -146,24 +147,27 @@
     return entry.label;
   }
 
-  function afterTimeTravel(msg) {
+  function afterTimeTravel(msg, skipSave) {
     ui.raiseOpen = false;
     ui.winnersFor = null;
-    save();
+    if (!skipSave) save();
     render();
     if (msg) toast(msg, 'info');
   }
 
-  function undo() {
-    if (!undoStack.length) return;
+  // skipSave: used while Undo/Redo is held down; the game is saved once on release.
+  function undo(skipSave) {
+    if (!undoStack.length) return false;
     var label = step(undoStack, redoStack);
-    afterTimeTravel('Undid: ' + (label || 'last action'));
+    afterTimeTravel('Undid: ' + (label || 'last action'), skipSave === true);
+    return true;
   }
 
-  function redo() {
-    if (!redoStack.length) return;
+  function redo(skipSave) {
+    if (!redoStack.length) return false;
     var label = step(redoStack, undoStack);
-    afterTimeTravel('Redid: ' + (label || 'last action'));
+    afterTimeTravel('Redid: ' + (label || 'last action'), skipSave === true);
+    return true;
   }
 
   function redoAll() {
@@ -220,7 +224,7 @@
     return '<svg class="chip-emblem ' + (cls || '') + '" viewBox="0 0 64 64" aria-hidden="true">' +
       '<circle cx="32" cy="32" r="30" fill="#b3262f" stroke="#5e0f15" stroke-width="2"/>' + spots +
       '<circle cx="32" cy="32" r="19" fill="#8f1b23" stroke="#f3ecda" stroke-width="2" stroke-dasharray="4 3"/>' +
-      '<text x="32" y="38.5" text-anchor="middle" font-family="Limelight, Georgia, serif" font-size="17" fill="#dcb662">CL</text>' +
+      '<text x="32" y="38.5" text-anchor="middle" font-family="Limelight, Georgia, serif" font-size="17" fill="#dcb662">CT</text>' +
       '</svg>';
   }
 
@@ -245,7 +249,7 @@
     app.innerHTML =
       '<div class="setup">' +
         '<header class="hero">' + chipEmblem() +
-          '<h1>Chip Leader</h1>' +
+          '<h1>Chip Tracker</h1>' +
           '<p>Deal real cards. The app keeps every stack, bet, raise and side pot straight.</p>' +
         '</header>' +
         '<form class="panel" id="setup-form" novalidate>' +
@@ -336,11 +340,11 @@
     app.innerHTML =
       '<div class="screen">' +
         '<header class="topbar">' +
-          '<div class="brand">' + chipEmblem() + '<b>Chip Leader</b></div>' +
+          '<div class="brand">' + chipEmblem() + '<b>Chip Tracker</b></div>' +
           '<div class="hand-info"><b>' + title + '</b><span>' + blinds + '</span></div>' +
           '<nav>' +
-            '<button class="icon-btn" data-do="undo" ' + (undoStack.length ? '' : 'disabled') + ' aria-label="Undo">' + ICONS.undo + '<span class="lbl">Undo</span></button>' +
-            '<button class="icon-btn" data-do="redo" ' + (redoStack.length ? '' : 'disabled') + ' aria-label="Redo">' + ICONS.redo + '<span class="lbl">Redo</span></button>' +
+            '<button class="icon-btn" data-do="undo" data-hold="1" ' + (undoStack.length ? '' : 'disabled') + ' aria-label="Undo">' + ICONS.undo + '<span class="lbl">Undo</span></button>' +
+            '<button class="icon-btn" data-do="redo" data-hold="1" ' + (redoStack.length ? '' : 'disabled') + ' aria-label="Redo">' + ICONS.redo + '<span class="lbl">Redo</span></button>' +
             '<button class="icon-btn" data-do="sheet" data-sheet="log" aria-label="Hand log">' + ICONS.log + '<span class="lbl">Log</span></button>' +
             '<button class="icon-btn" data-do="sheet" data-sheet="players" aria-label="Players and chip counts">' + ICONS.players + '<span class="lbl">Players</span></button>' +
             '<button class="icon-btn" data-do="sheet" data-sheet="menu" aria-label="Menu">' + ICONS.menu + '</button>' +
@@ -746,7 +750,7 @@
       '<li>Any part of a bet nobody can call goes straight back to the bettor.</li>' +
       '<li>When someone is all-in, the pot is split into a main pot and side pots. Each player can only win what they matched.</li>' +
       '<li>Split pots are shared evenly; an odd chip goes to the winner closest to the left of the button.</li>' +
-      '<li>Made a mistake? Undo steps back one action at a time, right back to the start of the hand and beyond, restoring every stack and bet exactly. Redo, or Latest, brings everything back as long as you haven’t taken a new action since.</li>' +
+      '<li>Made a mistake? Undo steps back one action at a time, right back to the start of the hand and beyond, restoring every stack and bet exactly. Hold Undo or Redo to move quickly. Redo, or Latest, brings everything back as long as you haven’t taken a new action since.</li>' +
       '</ul></div>';
     return out;
   }
@@ -830,6 +834,15 @@
       return;
     }
     renderTable();
+    // While Undo/Redo is held down, keep the same button element on screen so the
+    // finger-up event still reaches it after the rest of the page is redrawn.
+    if (hold) {
+      var fresh = app.querySelector('[data-hold][data-do="' + hold.action + '"]');
+      if (fresh) {
+        hold.el.disabled = fresh.disabled;
+        fresh.replaceWith(hold.el);
+      }
+    }
     layoutTable();
     var nb = document.getElementById('sheet-body');
     if (nb) nb.scrollTop = scroll;
@@ -952,9 +965,52 @@
     },
   };
 
+  // ---------- hold Undo / Redo to repeat ----------
+
+  var hold = null; // { action, el, timer, steps }
+
+  function holdStep() {
+    if (!hold) return;
+    var moved = hold.action === 'undo' ? undo(true) : redo(true);
+    if (!moved) return endHold();
+    hold.steps++;
+    // Start at 3 steps a second and speed up to about 12 a second.
+    var delay = hold.steps === 1 ? 450 : Math.max(80, 260 - hold.steps * 25);
+    hold.timer = setTimeout(holdStep, delay);
+  }
+
+  function endHold() {
+    if (!hold) return;
+    clearTimeout(hold.timer);
+    var steps = hold.steps;
+    var action = hold.action;
+    hold = null;
+    save();
+    render();
+    if (steps > 1) toast((action === 'undo' ? 'Went back ' : 'Went forward ') + steps + ' steps', 'info');
+  }
+
+  app.addEventListener('pointerdown', function (e) {
+    var el = e.target.closest('[data-hold]');
+    if (!el || el.disabled || (e.pointerType === 'mouse' && e.button !== 0)) return;
+    e.preventDefault();
+    hold = { action: el.dataset.do, el: el, timer: null, steps: 0 };
+    holdStep();
+  });
+  ['pointerup', 'pointercancel'].forEach(function (type) {
+    document.addEventListener(type, endHold);
+  });
+  window.addEventListener('blur', endHold);
+  document.addEventListener('visibilitychange', endHold);
+  app.addEventListener('contextmenu', function (e) {
+    if (e.target.closest('[data-hold]')) e.preventDefault();
+  });
+
   app.addEventListener('click', function (e) {
     var el = e.target.closest('[data-do]');
     if (!el || el.disabled) return;
+    // Taps on Undo/Redo are handled on pointerdown; keyboard presses (detail 0) still come through here.
+    if (el.dataset.hold && e.detail !== 0) return;
     var fn = handlers[el.dataset.do];
     if (fn) fn(el.dataset, el, e);
   });

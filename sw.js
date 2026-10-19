@@ -3,7 +3,7 @@
  * keeps working with no signal. When online, fresh files are fetched first
  * so updates show up on the next launch.
  */
-var CACHE = 'chip-leader-v2';
+var CACHE = 'chip-tracker-v3';
 var SHELL = [
   './',
   'index.html',

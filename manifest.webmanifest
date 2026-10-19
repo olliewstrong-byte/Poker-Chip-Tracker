@@ -1,6 +1,6 @@
 {
-  "name": "Chip Leader",
-  "short_name": "Chip Leader",
+  "name": "Chip Tracker",
+  "short_name": "Chip Tracker",
   "description": "Poker chip tracker for home games: real cards, and the app does the betting math, pots and side pots.",
   "start_url": "./",
   "scope": "./",
