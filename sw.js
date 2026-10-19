@@ -3,7 +3,7 @@
  * keeps working with no signal. When online, fresh files are fetched first
  * so updates show up on the next launch.
  */
-var CACHE = 'chip-tracker-v3';
+var CACHE = 'chip-tracker-v4';
 var SHELL = [
   './',
   'index.html',
@@ -18,7 +18,9 @@ var SHELL = [
 ];
 
 self.addEventListener('install', function (event) {
-  event.waitUntil(caches.open(CACHE).then(function (cache) { return cache.addAll(SHELL); }));
+  event.waitUntil(caches.open(CACHE).then(function (cache) {
+    return cache.addAll(SHELL.map(function (url) { return new Request(url, { cache: 'reload' }); }));
+  }));
   self.skipWaiting();
 });
 
@@ -51,9 +53,10 @@ self.addEventListener('fetch', function (event) {
 
   if (url.origin !== self.location.origin) return;
 
-  // App files: network first, fall back to the cache when offline.
+  // App files: network first (skipping the browser's 10-minute cache so new
+  // versions show up immediately), falling back to the cache when offline.
   event.respondWith(
-    fetch(req).then(function (res) {
+    fetch(req, { cache: 'no-cache' }).then(function (res) {
       if (res.ok) {
         var copy = res.clone();
         caches.open(CACHE).then(function (cache) { cache.put(req, copy); });

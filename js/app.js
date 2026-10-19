@@ -990,21 +990,57 @@
     if (steps > 1) toast((action === 'undo' ? 'Went back ' : 'Went forward ') + steps + ' steps', 'info');
   }
 
-  app.addEventListener('pointerdown', function (e) {
-    var el = e.target.closest('[data-hold]');
-    if (!el || el.disabled || (e.pointerType === 'mouse' && e.button !== 0)) return;
-    e.preventDefault();
-    hold = { action: el.dataset.do, el: el, timer: null, steps: 0 };
+  function startHold(el, input) {
+    if (hold) endHold();
+    hold = { action: el.dataset.do, el: el, timer: null, steps: 0, input: input };
     holdStep();
+  }
+
+  // Touch screens: handle the raw touch so iOS can't turn a long press into
+  // text selection, a callout menu or a cancelled gesture.
+  app.addEventListener('touchstart', function (e) {
+    var el = e.target.closest('[data-hold]');
+    if (!el || el.disabled) return;
+    e.preventDefault();
+    startHold(el, 'touch');
+  }, { passive: false });
+  ['touchend', 'touchcancel'].forEach(function (type) {
+    document.addEventListener(type, function () { if (hold && hold.input === 'touch') endHold(); });
+  });
+
+  // Mouse and pen.
+  app.addEventListener('pointerdown', function (e) {
+    if (e.pointerType === 'touch') return;
+    var el = e.target.closest('[data-hold]');
+    if (!el || el.disabled || e.button !== 0) return;
+    e.preventDefault();
+    startHold(el, 'pointer');
   });
   ['pointerup', 'pointercancel'].forEach(function (type) {
-    document.addEventListener(type, endHold);
+    document.addEventListener(type, function (e) {
+      if (hold && hold.input === 'pointer' && e.pointerType !== 'touch') endHold();
+    });
   });
   window.addEventListener('blur', endHold);
   document.addEventListener('visibilitychange', endHold);
   app.addEventListener('contextmenu', function (e) {
     if (e.target.closest('[data-hold]')) e.preventDefault();
   });
+
+  // iPhone Safari can still zoom on a quick double tap. If two taps land
+  // within 350ms, cancel the second one's zoom and deliver it as a normal tap.
+  var lastTouchEnd = 0;
+  document.addEventListener('touchend', function (e) {
+    var now = Date.now();
+    var quick = now - lastTouchEnd < 350;
+    lastTouchEnd = now;
+    if (!quick || e.touches.length || e.changedTouches.length !== 1) return;
+    var t = e.target.nodeType === 1 ? e.target : e.target.parentElement;
+    if (!t || t.closest('input, select, textarea, [data-hold]')) return;
+    e.preventDefault();
+    var tap = t.closest('button, label, a, [data-do]');
+    if (tap && !tap.disabled) tap.click();
+  }, { passive: false });
 
   app.addEventListener('click', function (e) {
     var el = e.target.closest('[data-do]');
@@ -1082,9 +1118,22 @@
   document.addEventListener('visibilitychange', keepAwake);
 
   // Installable app: cache the files so the tracker works offline.
+  // When a new version is published, switch to it straight away. The game is
+  // saved on the device, so reloading loses nothing.
   if ('serviceWorker' in navigator && /^https:|^http:\/\/localhost/.test(location.href)) {
+    var hadController = !!navigator.serviceWorker.controller;
+    var reloaded = false;
+    navigator.serviceWorker.addEventListener('controllerchange', function () {
+      if (!hadController || reloaded || hold) { hadController = true; return; }
+      reloaded = true;
+      location.reload();
+    });
     window.addEventListener('load', function () {
-      navigator.serviceWorker.register('sw.js').catch(function () { /* not available here */ });
+      navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(function (reg) {
+        document.addEventListener('visibilitychange', function () {
+          if (document.visibilityState === 'visible') reg.update().catch(function () {});
+        });
+      }).catch(function () { /* not available here */ });
     });
   }
 
